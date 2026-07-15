@@ -94,6 +94,10 @@ export function Dashboard() {
             icon={app.icon}
             onClick={() => setActive(app.id)}
             aria-label={`Open ${app.name}`}
+            // Announce the currently-open app to screen readers and
+            // assistive browse-mode so a student navigating with a
+            // refreshable Braille display sees which tile is live.
+            aria-current={active === app.id ? 'page' : undefined}
           >
             <div style={{ fontSize: 14, marginTop: 2 }}>{app.name}</div>
           </TouchButton>

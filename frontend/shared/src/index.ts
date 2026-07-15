@@ -8,3 +8,4 @@ export * from './utils.js';
 export * from './seed.js';
 export * from './wallpapers.js';
 export * from './icons.jsx';
+export * from './launcher.js';

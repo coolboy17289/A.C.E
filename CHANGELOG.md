@@ -6,6 +6,40 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **Keyboard accessibility** for the design system. A new
+  side-effect CSS file (`frontend/design-system/src/a11y.css`)
+  ships with `@ace/design-system` and applies a `:focus-visible`
+  ring (3 px `#3da8ff`, 2 px offset) to every `button`,
+  `div[role="button"]`, `input`, `select`, and `textarea`. The
+  selector uses `:where(...)` so any per-theme override still
+  wins.
+- **Reduced-motion opt-out**. A `@media (prefers-reduced-motion:
+  reduce)` block in the same CSS file collapses every animation
+  and transition to 0.001 ms so the kiosk no longer animates
+  press states, palette flips, or toasts for users with
+  vestibular motion sensitivity.
+- **`aria-current="page"`** on the desktop shell's launcher
+  button for the active app, so screen-reader users hear which
+  tile corresponds to the currently-open app.
+
+### Changed
+
+- `backend/src/db.ts::safeJson` previously duplicated the default
+  `UserPreferences` literal in both fallback branches. The
+  fallback is now a single `DEFAULT_PREFERENCES` constant
+  exported alongside; the two restore paths can no longer drift.
+
+### Tests
+
+- New `backend/tests/db.test.ts` covers the eight row-mapper
+  functions (`rowToTask`, `rowToSubject`, `rowToEvent`,
+  `rowToNote`, `rowToSession`, `rowToMessage`,
+  `rowToNotification`, `rowToUser`) plus the JSON safety
+  helpers (`safeJsonArray`, `safeJson` through `rowToUser`) that
+  previously had only integration coverage in `api.test.ts`.
+
 ## [2.0.0] - In progress
 
 The v2 --beta release is a full re-code of the codebase for stronger

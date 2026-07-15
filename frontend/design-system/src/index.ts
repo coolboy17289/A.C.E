@@ -10,6 +10,11 @@
  *   } from '@ace/design-system';
  */
 
+// Side-effect: keyboard focus rings and prefers-reduced-motion. Picked
+// up by Vite at build time and bundled into every design-system
+// consumer so no app has to wire it up explicitly.
+import './a11y.css';
+
 export { palette, minTapGapMs, type, type ThemeMode, type ThemePalette } from './theme.js';
 export {
   spacing, minTouchTarget, primaryTouchTarget, largeTouchTarget,

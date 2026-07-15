@@ -1,0 +1,52 @@
+/*
+ * A.C.E OS accessibility primitives.
+ *
+ * Imported as a side-effect from `@ace/design-system`'s index.ts so
+ * every workspace that consumes the design system gets the rules below
+ * with no explicit opt-in. The rules are deliberately scoped to
+ * keyboard navigation and motion sensitivity so they don't fight any
+ * per-component inline styling.
+ *
+ * Scope decisions:
+ *   - :where(...) keeps selector specificity at 0 so a consumer's own
+ *     `:focus { outline: none; }` would still override (we don't
+ *     want theme overrides blocked). At the same time, the default
+ *     ring colour (#3da8ff) has > 4.5:1 contrast against both the
+ *     dark and light A.C.E palettes so the ring is visible until
+ *     something overrides it.
+ *   - For the prefers-reduced-motion block, we override to a duration
+ *     of 0.001ms (not 0) rather than fully killing animations —
+ *     CSS animation events still fire so listeners that want to react
+ *     to an "animationend" keep working, but visually nothing
+ *     moves.
+ *   - We do NOT touch transform. The press-state handlers in
+ *     TouchButton / TouchCard / TouchRow set inline transform style
+ *     on pointer-down. With transition-duration: 0.001ms the press
+ *     squish still applies on press but lands on the same frame as
+ *     the pointerdown event — effectively a no-op visually while
+ *     leaving the data-attribute cue (data-pressed) intact for any
+ *     future styling that wants to react differently in the reduced
+ *     motion case.
+ */
+
+:where(
+    button,
+    div[role="button"],
+    input,
+    select,
+    textarea
+  ):focus-visible {
+  outline: 3px solid #3da8ff;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

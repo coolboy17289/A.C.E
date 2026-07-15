@@ -100,6 +100,14 @@ export const api = {
     request<FocusSession>('POST', '/api/focus', s),
   updateSession: (id: string, patch: Partial<FocusSession>) =>
     request<FocusSession>('PATCH', `/api/focus/${id}`, patch),
+  // Focus (nested aliases — handy when apps want a namespaced surface)
+  focus: {
+    list: () => request<FocusSession[]>('GET', '/api/focus'),
+  },
+  // Tasks (nested aliases)
+  tasks: {
+    list: () => request<Task[]>('GET', '/api/tasks'),
+  },
   // AI
   listMessages: () => request<ChatMessage[]>('GET', '/api/ai/messages'),
   sendMessage: (content: string) =>

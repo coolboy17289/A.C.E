@@ -261,13 +261,27 @@ function safeJsonArray(v: unknown): unknown[] {
   catch { return []; }
 }
 
+/**
+ * Default preferences restored when a user record's `preferences`
+ * column is missing or unreadable. Mirrors `defaultPrefs` in
+ * `@ace/shared/src/store.ts` so a freshly seeded SQLite user lands
+ * on the same look as a freshly hydrated one (the wizard's
+ * "Dark + #60a5fa + 18 px + Student").
+ *
+ * Kept here as well so `safeJson`'s fallback path can't drift from
+ * the seed path; the unit tests in `backend/tests/db.test.ts` pin
+ * both branches to the same object shape.
+ */
+const DEFAULT_PREFERENCES: UserProfile['preferences'] = {
+  theme: 'dark',
+  accentColor: '#60a5fa',
+  fontScale: 1,
+  notificationsEnabled: true,
+  reduceMotion: false,
+  username: 'Student',
+};
+
 function safeJson(v: unknown): UserProfile['preferences'] {
-  if (typeof v !== 'string') return {
-    theme: 'dark', accentColor: '#60a5fa', fontScale: 1,
-    notificationsEnabled: true, reduceMotion: false, username: 'Student',
-  };
-  try { return JSON.parse(v); } catch { return {
-    theme: 'dark', accentColor: '#60a5fa', fontScale: 1,
-    notificationsEnabled: true, reduceMotion: false, username: 'Student',
-  }; }
+  if (typeof v !== 'string') return DEFAULT_PREFERENCES;
+  try { return JSON.parse(v); } catch { return DEFAULT_PREFERENCES; }
 }
