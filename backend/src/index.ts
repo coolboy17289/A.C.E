@@ -11,6 +11,7 @@ import { startDeviceMonitor } from './services/hardware.js';
 // server isn't running and 4317 is free for it - set ACE_PORT=4317 then.
 const PORT = Number(process.env.ACE_PORT ?? 4318);
 const DB_PATH = process.env.ACE_DB_PATH ?? './data/ace.db';
+const AUTO_INSTALL_OLLAMA = process.env.ACE_AUTO_INSTALL_OLLAMA === '1';
 
 async function main() {
   const db = openDatabase(DB_PATH);
@@ -28,6 +29,22 @@ async function main() {
     // eslint-disable-next-line no-console
     console.log(`[ace-backend] listening on http://0.0.0.0:${PORT}`);
   });
+
+  // Optional: kick off Ollama install in the background when the user
+  // has opted in via ACE_AUTO_INSTALL_OLLAMA=1. We never block boot; the
+  // AI Tutor's /api/ai/status endpoint reflects progress and the
+  // frontend's "Set up Ollama" CTA will see `installing` flip true.
+  //
+  // Dynamic import keeps the cost of finding a missing script to one
+  // extra microtask, and avoids a synchronous boot stall while the
+  // curl-into-Docker install runs.
+  if (AUTO_INSTALL_OLLAMA) {
+    const { runInstall } = await import('./services/ai.js');
+    void runInstall().catch((err) => {
+      // eslint-disable-next-line no-console
+      console.warn('[ace-backend] background Ollama install failed', err);
+    });
+  }
 
   const shutdown = (signal: string) => {
     // eslint-disable-next-line no-console

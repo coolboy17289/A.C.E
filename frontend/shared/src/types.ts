@@ -162,6 +162,27 @@ export interface SystemToast {
   ts: number;
 }
 
+/**
+ * Snapshot of the AI Tutor's Ollama wiring, returned by
+ * `GET /api/ai/status`. Used to drive the frontend's "Set up Ollama"
+ * CTA and the install-progress polling UI.
+ *
+ * - `running` is a live probe against `${host}/api/tags`.
+ * - `installing` flips true while `install-ollama.sh` is spawning.
+ * - `installable` is `false` if the script can't be located on disk.
+ * - `lastInstallAt` + `lastInstallOk` are the most recent run results
+ *   (used to surface "install failed" hints to the user).
+ */
+export interface AiStatus {
+  running: boolean;
+  host: string;
+  model: string;
+  installing: boolean;
+  installable: boolean;
+  lastInstallAt?: string;
+  lastInstallOk?: boolean;
+}
+
 export interface ApiError {
   error: string;
   details?: string;

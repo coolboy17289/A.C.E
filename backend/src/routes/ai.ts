@@ -3,7 +3,7 @@ import type { Db } from '../db.js';
 import { ah } from '../util/error.js';
 import { newId } from '../util/ids.js';
 import { rowToMessage } from '../db.js';
-import { ask, describeImageWithFallback } from '../services/ai.js';
+import { ask, describeImageWithFallback, status as aiStatus, runInstall } from '../services/ai.js';
 import type { ChatMessage } from '@ace/shared';
 
 const HISTORY_LIMIT = 200;
@@ -55,5 +55,23 @@ export function registerAiRoutes(app: Application, _db: Db) {
   app.post('/api/ai/reset', ah((_req, res) => {
     _db.prepare('DELETE FROM messages').run();
     res.json({ ok: true });
+  }));
+
+  // Lightweight status endpoint. The frontend polls this every few
+  // seconds while waiting for Ollama to come up.
+  app.get('/api/ai/status', ah(async (_req, res) => {
+    res.json(await aiStatus());
+  }));
+
+  // Manual "Set up Ollama" trigger. The route always returns immediately
+  // with `{ started: true }` so the UI doesn't hang; the actual install
+  // runs in the background via `runInstall` and the next /status poll
+  // reflects progress.
+  app.post('/api/ai/install', ah(async (_req, res) => {
+    void runInstall().catch((err) => {
+      // eslint-disable-next-line no-console
+      console.warn('[ace-ai] background install crashed', err);
+    });
+    res.json({ started: true });
   }));
 }

@@ -2,6 +2,7 @@
 // so they all talk to the backend using identical semantics.
 
 import type {
+  AiStatus,
   CalendarEvent,
   ChatMessage,
   DeviceInfo,
@@ -106,6 +107,10 @@ export const api = {
   describeImage: (prompt: string) =>
     request<ChatMessage>('POST', '/api/ai/vision', { prompt }),
   resetChat: () => request<{ ok: true }>('POST', '/api/ai/reset'),
+  // Cheap status probe used by the AI Tutor's "Set up Ollama" CTA and
+  // background poll while waiting for an in-flight install to land.
+  getAiStatus: () => request<AiStatus>('GET', '/api/ai/status'),
+  installOllama: () => request<{ started: boolean }>('POST', '/api/ai/install'),
   // Notifications
   listNotifications: () => request<NotificationRecord[]>('GET', '/api/notifications'),
   markNotification: (id: string, read: boolean) =>

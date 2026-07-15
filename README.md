@@ -154,4 +154,7 @@ Update: version 1.2.1 --beta is now being pushed timespame jul 15 1829hr
 Update v1.2.1--beta is a broken vertion not to be used 
 update v1.2.2 -- beta is a fix hopefull that is now being pushed 
   Note: ai tutor is broken 
-Update: backend fixxes V1.2.3 --beta   
+Update: backend fixxes V1.2.3 --beta   is pushed
+Note erros are fin and to be ignored at this stage
+     Next step is to fix thems and add mreo apps fix light and dark mode and try and make the first iso 
+update      

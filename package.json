@@ -25,6 +25,7 @@
     "preview:shell": "npm run preview --workspace=@ace/desktop-shell",
     "raspi:info": "bash raspberry-pi/system/info.sh",
     "raspi:blink": "node raspberry-pi/gpio/scripts/blink.js 17",
+    "raspi:ollama": "bash system/linux-config/install-ollama.sh",
     "later:restore:frontend": "echo 'move apps back: mv later/apps/{home,tasks,planner,focus,subjects,statistics} frontend/apps/' && echo 'then add entries back to frontend/shared/src/apps-registry.ts and update vite + tsconfig aliases'",
     "later:restore:os": "echo 'mv later/os ./os'"
   },

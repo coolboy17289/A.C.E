@@ -1,9 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { api, classNames, formatDate, uid, type ChatMessage } from '@ace/shared';
+import { api, classNames, formatDate, uid, type AiStatus, type ChatMessage } from '@ace/shared';
 
 /**
  * A.C.E AI Tutor - conversational study helper. The backend tries Ollama
  * first; if it isn't reachable we still answer from a study-aware stub.
+ *
+ * When Ollama is missing AND the install script is present on the host,
+ * the header renders a "Set up Ollama" button that POSTs to
+ * `/api/ai/install` and starts polling `/api/ai/status` every few
+ * seconds until `running === true`.
  */
 const AiApp: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -11,12 +16,34 @@ const AiApp: React.FC = () => {
   const [sending, setSending] = useState(false);
   const [remote, setRemote] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<AiStatus | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => { void refresh(); }, []);
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages.length]);
+
+  // Lightweight /status probe on mount. Cheap (one HTTP GET) and tells
+  // us up-front whether the install CTA should appear.
+  useEffect(() => {
+    let cancelled = false;
+    void api.getAiStatus()
+      .then((s) => { if (!cancelled) setStatus(s); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
+
+  // Background poll while we're not yet running and not currently mid-
+  // install. We back off when `installing` is true so we don't dogpile
+  // the backend's installState flag.
+  useEffect(() => {
+    if (!status || status.running || status.installing) return;
+    const t = setInterval(() => {
+      void api.getAiStatus().then(setStatus).catch(() => undefined);
+    }, 4_000);
+    return () => clearInterval(t);
+  }, [status]);
 
   async function refresh() {
     try {
@@ -64,18 +91,57 @@ const AiApp: React.FC = () => {
     setMessages([]);
   }
 
+  async function startOllamaInstall() {
+    try {
+      await api.installOllama();
+      // Reflect the install kick-off immediately so the CTA morphs
+      // into the "Installing…" status without waiting for the next poll.
+      setStatus((s) => s ? { ...s, installing: true } : s);
+    } catch (e) {
+      setError(String((e as Error).message));
+    }
+  }
+
+  const showInstall =
+    status !== null &&
+    status.installable &&
+    !status.running &&
+    !status.installing &&
+    remote === false;
+
+  let statusText: string;
+  if (remote === false) statusText = 'Using offline fallback (no Ollama)';
+  else if (remote === true) statusText = 'Connected to Ollama';
+  else statusText = 'Connecting\u2026';
+
+  if (status?.installing) {
+    statusText = 'Installing Ollama\u2026';
+  } else if (showInstall === false && status?.lastInstallOk === false && status?.lastInstallAt) {
+    // Surface a past install failure on the next mount so the user
+    // knows to retry.
+    statusText = 'Last install attempt did not bring Ollama up. Try again from the button.';
+  }
+
   return (
     <div className="flex flex-col h-full">
       <header className="px-5 py-3 border-b border-white/10 flex items-center justify-between gap-3 flex-none">
         <div>
           <h1 className="text-xl font-semibold">AI Tutor</h1>
-          <p className="text-xs text-ace-muted">
-            {remote === false && 'Using offline fallback (no Ollama)'}
-            {remote === true && 'Connected to Ollama'}
-            {remote === null && 'Connecting…'}
-          </p>
+          <p className="text-xs text-ace-muted">{statusText}</p>
         </div>
-        <button className="ace-btn" onClick={reset}>Reset chat</button>
+        <div className="flex items-center gap-2">
+          {showInstall && (
+            <button
+              type="button"
+              className="ace-btn-primary"
+              onClick={startOllamaInstall}
+              data-testid="install-ollama"
+            >
+              Set up Ollama
+            </button>
+          )}
+          <button className="ace-btn" onClick={reset}>Reset chat</button>
+        </div>
       </header>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-5 space-y-3">
@@ -126,7 +192,7 @@ const Bubble: React.FC<{ message: ChatMessage }> = ({ message }) => {
         <div className="text-sm whitespace-pre-wrap">{message.content}</div>
         <div className="text-[10px] text-ace-muted mt-1 flex items-center gap-2">
           <span>{formatDate(message.ts)}</span>
-          {message.model && <span className="ace-pill text-[9px]">{message.model}</span>}
+          {message.model && <span className="ace-pill text-[9px]\">{message.model}</span>}
         </div>
       </div>
     </div>

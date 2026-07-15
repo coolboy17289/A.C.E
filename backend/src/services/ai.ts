@@ -10,13 +10,17 @@
  * (`llama3.2:3b`) is a great trade-off between quality and Pi 4/5 memory.
  */
 
+import { execFile } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { newId } from '../util/ids.js';
 import type { ChatMessage } from '@ace/shared';
 
 const DEFAULT_HOST = process.env.ACE_OLLAMA_HOST ?? 'http://localhost:11434';
 const DEFAULT_MODEL = process.env.ACE_OLLAMA_MODEL ?? 'llama3.2:3b';
 // Guard the env: a bad value like "8s" parses to NaN and would freeze the
-// fetch forever. Clamp into a sane 1 s–5 min range with a 20 s default.
+// fetch forever. Clamp into a sane 1 s-5 min range with a 20 s default.
 const REQUEST_TIMEOUT_MS = (() => {
   const raw = Number(process.env.ACE_OLLAMA_TIMEOUT_MS ?? 20_000);
   return Number.isFinite(raw) && raw > 0 ? Math.min(Math.max(raw, 1_000), 300_000) : 20_000;
@@ -50,11 +54,130 @@ export interface AskResult {
   error?: string;
 }
 
+/**
+ * Status snapshot used by `GET /api/ai/status` and rendered by the AI
+ * Tutor's "Set up Ollama" CTA. `running` is a live probe; the rest is
+ * cheap to read off module-level state.
+ */
+export interface AiStatus {
+  running: boolean;
+  host: string;
+  model: string;
+  installing: boolean;
+  installable: boolean;
+  lastInstallAt?: string;
+  lastInstallOk?: boolean;
+}
+
 const SYSTEM_PROMPT = [
   'You are the A.C.E OS study assistant - concise, supportive, focused on helping a student learn.',
   'Use plain language. Break problems into steps. Always encourage understanding over rote answers.',
   'When asked to quiz the user, output 3 short questions and let them answer one at a time.',
 ].join(' ');
+
+/**
+ * Cross-call state for the install script. Held in module scope so the
+ * /status endpoint can reflect "installing" without us keeping the
+ * promise alive across requests.
+ */
+const installState: {
+  installing: boolean;
+  lastInstallAt?: string;
+  lastInstallOk?: boolean;
+} = { installing: false };
+
+/**
+ * Locate `install-ollama.sh` on disk. Tries a few candidate paths so the
+ * contract is robust across dev (cwd=backend), root-launched dev
+ * (cwd=projectRoot), and built (`dist/src/`) layouts.
+ *
+ * Falls back to the cwd-best guess; the spawn will surface a clear
+ * ENOENT if the file really isn't there.
+ */
+function locateInstallScript(): string {
+  if (process.env.ACE_INSTALL_SCRIPT) return process.env.ACE_INSTALL_SCRIPT;
+  const candidates = [
+    path.resolve(process.cwd(), '../system/linux-config/install-ollama.sh'),
+    path.resolve(process.cwd(), 'system/linux-config/install-ollama.sh'),
+    path.resolve(fileURLToPath(import.meta.url), '../../../system/linux-config/install-ollama.sh'),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return candidates[0];
+}
+
+/**
+ * Cheap probe - one HTTP GET to `${host}/api/tags` with our standard
+ * timeout. Anyone calling /status once a second or so will not melt the
+ * Pi; the timeout is bounded and the request body is empty.
+ */
+async function probeOllama(): Promise<boolean> {
+  try {
+    const res = await fetch(`${DEFAULT_HOST}/api/tags`, {
+      method: 'GET',
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Public status snapshot. Used by /api/ai/status and the frontend's CTA.
+ */
+export async function status(): Promise<AiStatus> {
+  const running = await probeOllama();
+  return {
+    running,
+    host: DEFAULT_HOST,
+    model: process.env.ACE_OLLAMA_MODEL ?? DEFAULT_MODEL,
+    installing: installState.installing,
+    installable: fs.existsSync(locateInstallScript()),
+    lastInstallAt: installState.lastInstallAt,
+    lastInstallOk: installState.lastInstallOk,
+  };
+}
+
+/**
+ * Spawn `install-ollama.sh` in the background. Returns immediately with
+ * `{ started: true }` from the route; the resolved promise carries the
+ * final stdout + an ok flag so the route layer can log it if it wants.
+ *
+ * The script itself prints a final JSON line on stdout; we don't need
+ * to peek, but we log the last line for observability.
+ *
+ * Sequential re-entry is blocked: if a previous install is still
+ * running we return immediately rather than spawning a second instance.
+ */
+export function runInstall(): Promise<{ ok: boolean; lastLine: string }> {
+  return new Promise((resolve) => {
+    if (installState.installing) {
+      resolve({ ok: false, lastLine: 'install already in progress' });
+      return;
+    }
+    installState.installing = true;
+    const script = locateInstallScript();
+    execFile(
+      'bash',
+      [script],
+      { env: process.env, timeout: 5 * 60_000 },
+      (err, stdout) => {
+        installState.installing = false;
+        installState.lastInstallAt = new Date().toISOString();
+        installState.lastInstallOk = !err;
+        const lines = (stdout ?? '').trim().split('\n').filter(Boolean);
+        const lastLine = lines.length > 0 ? lines[lines.length - 1] : '';
+        // eslint-disable-next-line no-console
+        console.log(
+          `[ace-ai] install-ollama.sh exited: ${err?.code ?? 0}; last line: ${lastLine}`,
+        );
+        resolve({ ok: !err, lastLine });
+      },
+    );
+  });
+}
 
 /**
  * Asks the configured model. Communicates the timeout implicitly by setting
@@ -75,7 +198,7 @@ export async function ask(opts: AskOptions): Promise<AskResult> {
   const payload: OllamaChatRequest = { model, messages, stream: false };
 
   try {
-    const res = await fetch(`${DEFAULT_HOST}/api/chat`, {
+    const res = await await fetch(`${DEFAULT_HOST}/api/chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
@@ -109,10 +232,12 @@ export async function ask(opts: AskOptions): Promise<AskResult> {
   }
 }
 
-/** Image "vision" - the device camera hands a frame to the backend which
+/**
+ * Image "vision" - the device camera hands a frame to the backend which
  * stores it briefly and forwards a prompt to the model. For now we always
  * use the fallback path because shipping a multi-modal model on a Pi is
- * very expensive and out of scope for v1. */
+ * very expensive and out of scope for v1.
+ */
 export async function describeImageWithFallback(prompt: string): Promise<AskResult> {
   return {
     remote: false,
@@ -153,7 +278,7 @@ function fallbackAnswer(prompt: string): string {
     return [
       'Here are three practice questions:',
       '1. Explain the difference between correlation and causation in one sentence.',
-      '2. Solve: a body starts at rest and accelerates at 2 m/s². What is its velocity after 6 seconds?',
+      '2. Solve: a body starts at rest and accelerates at 2 m/s^2. What is its velocity after 6 seconds?',
       '3. Translate: "She walked slowly." into your target language (or a more vivid English version).',
     ].join('\n');
   }
