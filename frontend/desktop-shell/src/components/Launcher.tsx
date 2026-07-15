@@ -3,24 +3,30 @@ import { APP_REGISTRY, AppTile, Icon, useAceStore } from '@ace/shared';
 
 /**
  * Drawer-style launcher. Slides up from the taskbar when the A.C.E button is
- * pressed; this is the user's primary launch surface. It also doubles as a
- * notification centre when called from the top bell button.
- *
- * Each tile is rendered with the new AppTile component (gradient background
- * + white SVG glyph) instead of the legacy emoji swatch.
+ * pressed; this is the user's primary launch surface. The launcher also has
+ * a side column listing the most-recent notifications — the topbar bell
+ * still toggles the dedicated `NotificationCenter` panel for the
+ * keyboard-style "just show me the alerts" path.
  */
 export const Launcher: React.FC = () => {
-  const close = () => useAceStore.getState().setLauncherOpen(false);
+  const setLauncherOpen = useAceStore((s) => s.setLauncherOpen);
   const openApp = useAceStore((s) => s.openApp);
   const setUser = useAceStore((s) => s.setUser);
-  const setLauncherOpen = useAceStore((s) => s.setLauncherOpen);
-  const openSettings = useAceStore.getState().openApp;
 
   const username = useAceStore((s) => s.username);
   const avatar = useAceStore((s) => s.avatar);
   const notifications = useAceStore((s) => s.notifications);
   const markRead = useAceStore((s) => s.markRead);
   const clearNotifications = useAceStore((s) => s.clearNotifications);
+
+  // Centralised so the click handlers agree on the "open + close" sequence.
+  const launch = React.useCallback(
+    (id: Parameters<typeof openApp>[0]) => {
+      setLauncherOpen(false);
+      openApp(id);
+    },
+    [openApp, setLauncherOpen],
+  );
 
   return (
     <div className="absolute inset-0 z-40 animate-fade-up">
@@ -45,10 +51,10 @@ export const Launcher: React.FC = () => {
                 <button
                   key={app.id}
                   data-testid={`launcher-${app.id}`}
-                  onClick={() => { openApp(app.id); close(); }}
+                  onClick={() => launch(app.id)}
                   className="ace-tile p-4 text-left flex flex-col gap-3"
                 >
-                  <AppTile appId={app.id} accent={app.accent} size={56} aria-hidden />
+                  <AppTile appId={app.id} accent={app.accent} size={56} />
                   <div className="leading-tight">
                     <div className="font-semibold">{app.name}</div>
                     <div className="text-xs text-ace-muted mt-1 line-clamp-2">{app.description}</div>
@@ -79,7 +85,7 @@ export const Launcher: React.FC = () => {
                     <button
                       type="button"
                       className="underline"
-                      onClick={() => { openSettings('settings'); close(); }}
+                      onClick={() => launch('settings')}
                     >
                       Settings
                     </button>{' '}
@@ -136,7 +142,7 @@ export const Launcher: React.FC = () => {
         <button
           type="button"
           className="ace-nav-row mt-4"
-          onClick={() => { setLauncherOpen(false); openApp('settings'); }}
+          onClick={() => launch('settings')}
         >
           <Icon name="palette" size={18} />
           Theme & Wallpaper

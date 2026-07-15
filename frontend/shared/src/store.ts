@@ -11,6 +11,7 @@ import type {
   SystemToast,
   UserPreferences,
 } from './types.js';
+import { APP_REGISTRY } from './apps-registry.js';
 import { DEFAULT_WALLPAPER_CSS, type WallpaperPreset } from './wallpapers.js';
 
 interface AceState {
@@ -60,9 +61,19 @@ interface AceState {
   toast: (t: Omit<SystemToast, 'id' | 'ts'>) => void;
   dismissToast: (id: string) => void;
 
-  // Drawer / taskbar / boot
+  // Drawer / taskbar / boot / notification panel
   launcherOpen: boolean;
   setLauncherOpen: (open: boolean) => void;
+  /**
+   * Separate flag for the bell-button notification panel. Kept distinct
+   * from `launcherOpen` so the bell and the launcher don't fight each
+   * other when the user has both panels in their head. The notification
+   * panel auto-opens on a transition to "has unread" and can also be
+   * toggled manually from the topbar bell.
+   */
+  notifCenterOpen: boolean;
+  setNotifCenterOpen: (open: boolean) => void;
+  toggleNotifCenter: () => void;
   booting: boolean;
   bootDone: () => void;
 }
@@ -99,6 +110,10 @@ export const useAceStore = create<AceState>()(
         get().focusWindow(existing.id);
         return;
       }
+      // Resolve the title from the registry first so the window chrome
+      // shows the same label the launcher tile does. Fall back to a
+      // title-cased id for apps parked in later/ (no registry entry).
+      const meta = APP_REGISTRY.find((a) => a.id === id);
       const z = get().nextZ + 1;
       const idStr = `${id}-${Math.random().toString(36).slice(2, 8)}`;
       const width = Math.min(820, Math.max(560, window.innerWidth - 80));
@@ -112,7 +127,10 @@ export const useAceStore = create<AceState>()(
           {
             id: idStr,
             appId: id,
-            title: title ?? id[0].toUpperCase() + id.slice(1),
+            title:
+              title ??
+              meta?.name ??
+              (id ? id[0].toUpperCase() + id.slice(1) : 'App'),
             x, y, width, height,
             zIndex: z,
             minimized: false,
@@ -177,6 +195,11 @@ export const useAceStore = create<AceState>()(
 
     launcherOpen: false,
     setLauncherOpen: (open) => set({ launcherOpen: open }),
+
+    notifCenterOpen: false,
+    setNotifCenterOpen: (open) => set({ notifCenterOpen: open }),
+    toggleNotifCenter: () => set((s) => ({ notifCenterOpen: !s.notifCenterOpen })),
+
     booting: true,
     bootDone: () => set({ booting: false }),
   })),

@@ -181,6 +181,14 @@ export const MaximizeGlyph = make(
   </>,
 );
 
+/** "Restore" — two overlapping squares. Shown when a window is already maximized. */
+export const RestoreGlyph = make(
+  <>
+    <rect x="7" y="7" width="11" height="11" rx="1.5" />
+    <path d="M4 16V6a2 2 0 0 1 2-2h10" />
+  </>,
+);
+
 export const CheckGlyph = make(
   <>
     <path d="M5 12l5 5L20 6" />
@@ -270,7 +278,7 @@ export const ResetGlyph = make(
 export type IconName =
   | 'home' | 'planner' | 'tasks' | 'focus' | 'subjects' | 'ai' | 'statistics' | 'settings'
   | 'search' | 'bell' | 'wifi' | 'bluetooth' | 'battery' | 'user'
-  | 'plus' | 'close' | 'minimize' | 'maximize' | 'check' | 'refresh' | 'reset'
+  | 'plus' | 'close' | 'minimize' | 'maximize' | 'restore' | 'check' | 'refresh' | 'reset'
   | 'upload' | 'power' | 'trash' | 'pen' | 'palette' | 'sun' | 'moon' | 'image'
   | 'chevron-left' | 'chevron-right';
 
@@ -279,7 +287,7 @@ const REGISTRY: Record<IconName, React.FC<GlyphProps>> = {
   subjects: SubjectsGlyph, ai: AIGlyph, statistics: StatsGlyph, settings: SettingsGlyph,
   search: SearchGlyph, bell: BellGlyph, wifi: WifiGlyph, bluetooth: BluetoothGlyph,
   battery: BatteryGlyph, user: UserGlyph,
-  plus: PlusGlyph, close: CloseGlyph, minimize: MinimizeGlyph, maximize: MaximizeGlyph,
+  plus: PlusGlyph, close: CloseGlyph, minimize: MinimizeGlyph, maximize: MaximizeGlyph, restore: RestoreGlyph,
   check: CheckGlyph, refresh: RefreshGlyph, reset: ResetGlyph,
   upload: UploadGlyph, power: PowerGlyph, trash: TrashGlyph, pen: PenGlyph,
   palette: PaletteGlyph, sun: SunGlyph, moon: MoonGlyph, image: ImageGlyph,
@@ -295,26 +303,45 @@ export const Icon: React.FC<{ name: IconName } & GlyphProps> = ({ name, ...rest 
 
 /* ----------------- App Tile ----------------- */
 
+// AppTile accepts any app identifier (registered or parked). Parked ids
+// still render their glyph because the icon REGISTRY contains HomeGlyph,
+// FocusGlyph, etc. even when those apps are not in APP_REGISTRY.
 export type TileAppId =
-  | 'home' | 'planner' | 'tasks' | 'focus' | 'subjects' | 'ai' | 'statistics' | 'settings';
+  | 'home' | 'planner' | 'tasks' | 'focus' | 'subjects' | 'ai' | 'statistics' | 'settings'
+  | (string & {}); // widen to any string while keeping autocomplete for known ids
 
 interface AppTileProps extends Omit<React.HTMLAttributes<HTMLSpanElement>, 'color'> {
   appId: TileAppId;
   accent: string;
   size?: number;
-  /** When true, show the appId text below the tile. */
-  showLabel?: boolean;
-  label?: string;
 }
 
-function darkenHex(hex: string, amount: number): string {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex);
-  if (!m) return hex;
-  const r = parseInt(m[1].slice(0, 2), 16);
-  const g = parseInt(m[1].slice(2, 4), 16);
-  const b = parseInt(m[1].slice(4, 6), 16);
-  const f = 1 - amount / 100;
-  return `rgb(${Math.round(r * f)}, ${Math.round(g * f)}, ${Math.round(b * f)})`;
+/**
+ * Darken a CSS colour for the gradient endpoint. Accepts:
+ *   - 6-digit hex `#rrggbb` or `rrggbb`
+ *   - 3-digit hex `#rgb` or `rgb`
+ *   - any other string (`var(--x)`, `rgb(...)`, named colour) — returned
+ *     as-is so the gradient still falls back to a flat fill instead of
+ *     crashing on the CSS variable we use as a runtime default.
+ */
+function darkenHex(color: string, amount: number): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(color);
+  if (m) {
+    const r = parseInt(m[1].slice(0, 2), 16);
+    const g = parseInt(m[1].slice(2, 4), 16);
+    const b = parseInt(m[1].slice(4, 6), 16);
+    const f = 1 - amount / 100;
+    return `rgb(${Math.round(r * f)}, ${Math.round(g * f)}, ${Math.round(b * f)})`;
+  }
+  const short = /^#?([0-9a-f]{3})$/i.exec(color);
+  if (short) {
+    const r = parseInt(short[1][0] + short[1][0], 16);
+    const g = parseInt(short[1][1] + short[1][1], 16);
+    const b = parseInt(short[1][2] + short[1][2], 16);
+    const f = 1 - amount / 100;
+    return `rgb(${Math.round(r * f)}, ${Math.round(g * f)}, ${Math.round(b * f)})`;
+  }
+  return color;
 }
 
 /**
@@ -325,12 +352,12 @@ function darkenHex(hex: string, amount: number): string {
  * so screen readers don't announce the app name twice.
  */
 export const AppTile: React.FC<AppTileProps> = ({
-  appId, accent, size = 56, showLabel, label, style, ...rest
+  appId, accent, size = 56, style, ...rest
 }) => {
-  const Glyph = REGISTRY[appId];
+  const Glyph = (REGISTRY as Record<string, React.FC<GlyphProps> | undefined>)[appId];
   return (
     <span
-      aria-hidden={label ? undefined : true}
+      aria-hidden
       data-app-tile={appId}
       data-accent={accent}
       style={{

@@ -3,23 +3,15 @@ import { useAceStore } from '@ace/shared';
 import { Window } from './Window';
 
 /**
- * Renders every open window. The desktop background itself swallows the
- * initial click so a user can quickly dismiss focus and then click a new
- * target window.
+ * Renders every open window. Each window handles its own pointer-down
+ * focusing; the desktop background itself swallows clicks via the
+ * Wallpaper / launcher overlay, so there is no global "click outside to
+ * unfocus" handler needed.
  */
 export const WindowManager: React.FC = () => {
   const windows = useAceStore((s) => s.windows);
   return (
-    <div
-      className="absolute inset-0 z-10"
-      // Clicking outside any window blurs currently focused windows.
-      onPointerDown={(e) => {
-        if (e.target === e.currentTarget) {
-          // No-op: the store doesn't need explicit unfocus, the OS pattern
-          // is to allow re-clicking on any window to re-focus it.
-        }
-      }}
-    >
+    <div className="absolute inset-0 z-10">
       {windows
         .slice()
         .sort((a, b) => a.zIndex - b.zIndex)

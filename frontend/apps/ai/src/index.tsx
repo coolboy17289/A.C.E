@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { api, classNames, formatDate, type ChatMessage } from '@ace/shared';
+import { api, classNames, formatDate, uid, type ChatMessage } from '@ace/shared';
 
 /**
  * A.C.E AI Tutor - conversational study helper. The backend tries Ollama
@@ -21,7 +21,15 @@ const AiApp: React.FC = () => {
   async function refresh() {
     try {
       const m = await api.listMessages();
-      setMessages(m);
+      // Prefer the canonical backend list, but preserve any optimistic
+      // placeholder whose backend id hasn't arrived yet. Without this
+      // guard a `listMessages` failure (or a partial send success where
+      // the user message is still queued) wipes the user's in-flight text.
+      setMessages((prev) => {
+        const backendIds = new Set(m.map((x) => x.id));
+        const pending = prev.filter((p) => p.id.startsWith('pending_') && !backendIds.has(p.id));
+        return [...m, ...pending];
+      });
     } catch (e) { setError(String((e as Error).message)); }
   }
 
@@ -32,8 +40,11 @@ const AiApp: React.FC = () => {
     setSending(true);
     setError(null);
 
+    // Prefix the optimistic id with `pending_` so the dedupe in
+    // `refresh()` can distinguish it from any (extremely unlikely)
+    // backend message that happens to start with `msg_`.
     const optimistic: ChatMessage = {
-      id: `tmp_${Math.random()}`, role: 'user', content: text, ts: new Date().toISOString(),
+      id: uid('pending'), role: 'user', content: text, ts: new Date().toISOString(),
     };
     setMessages((p) => [...p, optimistic]);
 

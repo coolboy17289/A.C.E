@@ -69,43 +69,24 @@ export const TopBar: React.FC = () => {
 // `NotificationCenter`), not the app launcher. The launcher has its own
 // "Notifications" column for a fuller list — the bell is the
 // system-chrome shortcut for "what just happened?".
-const bellToggle = (() => {
-  // Tiny module-level event so NotificationCenter and TopBar can
-  // coordinate without prop-drilling through App. Mirrors the bus
-  // pattern already used for cross-app communication.
-  type Listener = (open: boolean) => void;
-  const listeners = new Set<Listener>();
-  let open = false;
-  return {
-    on(h: Listener) {
-      listeners.add(h);
-      return () => listeners.delete(h);
-    },
-    set(next: boolean) {
-      open = next;
-      listeners.forEach((l) => l(open));
-    },
-  };
-})();
-
-// Exported so `NotificationCenter` can subscribe to bell taps.
-export const bellOpenEvents = bellToggle;
-
-const NotificationsButton: React.FC<{ count: number }> = ({ count }) => (
-  <button
-    aria-label={`Notifications (${count} unread)`}
-    aria-haspopup="dialog"
-    className="ace-btn relative"
-    onClick={() => bellToggle.set(true)}
-  >
-    <Icon name="bell" size={18} />
-    {count > 0 && (
-      <span
-        className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold text-white flex items-center justify-center"
-        style={{ background: 'var(--ace-accent)' }}
-      >
-        {count}
-      </span>
-    )}
-  </button>
-);
+const NotificationsButton: React.FC<{ count: number }> = ({ count }) => {
+  const toggle = useAceStore((s) => s.toggleNotifCenter);
+  return (
+    <button
+      aria-label={`Notifications (${count} unread)`}
+      aria-haspopup="dialog"
+      className="ace-btn relative"
+      onClick={toggle}
+    >
+      <Icon name="bell" size={18} />
+      {count > 0 && (
+        <span
+          className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold text-white flex items-center justify-center"
+          style={{ background: 'var(--ace-accent)' }}
+        >
+          {count}
+        </span>
+      )}
+    </button>
+  );
+};

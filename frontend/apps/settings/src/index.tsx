@@ -81,26 +81,42 @@ const ThemeSection: React.FC = () => {
   const prefs = useAceStore((s) => s.preferences);
   const setPrefs = useAceStore((s) => s.setPreferences);
   const setUser = useAceStore((s) => s.setUser);
-  const userName = useAceStore((s) => s.username);
   const avatar = useAceStore((s) => s.avatar);
   const toast = useAceStore((s) => s.toast);
   const [busy, setBusy] = useState(false);
 
+  // Persist the current theme snapshot to the backend, mirroring the
+  // local store. We snapshot once so the network round-trip can't race
+  // with the user clicking another swatch mid-flight.
+  const snapshot = {
+    accentColor: prefs.accentColor,
+    reduceMotion: prefs.reduceMotion,
+    fontScale: prefs.fontScale,
+    theme: prefs.theme,
+    // `prefs.username` is the canonical source — fall back to the
+    // store-level `username` only if it's been wiped. Avoids the
+    // `state.username` and `preferences.username` drifting apart.
+    username: prefs.username || 'Student',
+  };
+
   async function save() {
     setBusy(true);
     try {
-      await api.updateUser({
-        name: prefs.username ?? userName,
+      await api.updateUser({ name: snapshot.username });
+      await api.saveSettings({
+        accentColor: snapshot.accentColor,
+        reduceMotion: snapshot.reduceMotion,
+        fontScale: snapshot.fontScale,
+        theme: snapshot.theme,
       });
-      await api.saveSettings({ accentColor: prefs.accentColor, reduceMotion: prefs.reduceMotion, fontScale: prefs.fontScale });
-      setPrefs({
-        accentColor: prefs.accentColor,
-        reduceMotion: prefs.reduceMotion,
-        fontScale: prefs.fontScale,
-      });
-      setUser(prefs.username ?? userName, avatar);
+      setPrefs(snapshot);
+      setUser(snapshot.username, avatar);
       toast({ title: 'Theme saved', body: 'New look applied.', variant: 'success' });
-    } finally { setBusy(false); }
+    } catch (e) {
+      toast({ title: 'Save failed', body: String((e as Error).message), variant: 'error' });
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -487,6 +503,9 @@ const ProfileSection: React.FC = () => {
     try {
       await api.updateUser({ name: draft.name, avatar: draft.avatar });
       setUserStore(draft.name, draft.avatar);
+      // Refresh the canonical UserProfile so the "Joined" date and any
+      // other server-derived fields reflect post-save state.
+      api.getUser().then((u) => setUserState(u)).catch(() => undefined);
       toast({ title: 'Profile updated', body: draft.name, variant: 'success' });
     } catch (e) {
       toast({ title: 'Save failed', body: String((e as Error).message), variant: 'error' });
@@ -647,7 +666,14 @@ const Tile: React.FC<{ label: string; value: string }> = ({ label, value }) => (
 
 const SystemSection: React.FC = () => {
   const toast = useAceStore((s) => s.toast);
-  const [hold, setHold] = useState<number>(0);   // 0..1 hold-to-confirm for restart
+  // Hold-to-confirm: pointerdown records a timestamp; pointerup checks
+  // the elapsed time. A boolean flag would let the first click succeed
+  // (React batches the pointerup's `setHold(0)` so the click handler
+  // still reads the old `true`). Time-based gating makes the behaviour
+  // independent of React's update timing.
+  const holdStart = React.useRef<number | null>(null);
+  const [holding, setHolding] = useState(false);
+  const HOLD_MS = 600;
 
   async function blink() {
     try {
@@ -668,6 +694,22 @@ const SystemSection: React.FC = () => {
     }
   }
 
+  async function restart() {
+    if (holdStart.current == null || Date.now() - holdStart.current < HOLD_MS) {
+      toast({ title: 'Hold to confirm', body: 'Press and hold the Restart button.', variant: 'warning' });
+      return;
+    }
+    try {
+      await api.triggerRestart();
+      toast({ title: 'Restarting', body: 'A.C.E will be back shortly.', variant: 'info' });
+    } catch (e) {
+      toast({ title: 'Failed', body: String((e as Error).message), variant: 'error' });
+    } finally {
+      holdStart.current = null;
+      setHolding(false);
+    }
+  }
+
   return (
     <Panel title="System" subtitle="Power actions and developer tools.">
       <div className="flex flex-wrap gap-2">
@@ -680,24 +722,13 @@ const SystemSection: React.FC = () => {
         <button
           type="button"
           className="ace-btn-danger select-none"
-          onPointerDown={() => setHold(1)}
-          onPointerUp={() => setHold(0)}
-          onPointerLeave={() => setHold(0)}
-          onClick={async () => {
-            if (hold < 1) {
-              toast({ title: 'Hold to confirm', body: 'Press and hold the Restart button.', variant: 'warning' });
-              return;
-            }
-            try {
-              await api.triggerRestart();
-              toast({ title: 'Restarting', body: 'A.C.E will be back shortly.', variant: 'info' });
-            } catch (e) {
-              toast({ title: 'Failed', body: String((e as Error).message), variant: 'error' });
-            }
-            setHold(0);
-          }}
+          onPointerDown={() => { holdStart.current = Date.now(); setHolding(true); }}
+          onPointerUp={() => setHolding(false)}
+          onPointerLeave={() => setHolding(false)}
+          onPointerCancel={() => setHolding(false)}
+          onClick={restart}
         >
-          <Icon name="refresh" size={16} /> {hold ? 'Release to restart' : 'Hold to restart'}
+          <Icon name="refresh" size={16} /> {holding ? 'Release to restart' : 'Hold to restart'}
         </button>
       </div>
       <p className="text-xs text-ace-muted mt-4">
@@ -709,7 +740,7 @@ const SystemSection: React.FC = () => {
       <details className="mt-4 text-xs text-ace-muted">
         <summary className="cursor-pointer">Build information</summary>
         <div className="mt-2 space-y-1">
-          <div>API base: {String(typeof window !== 'undefined' ? window.location.origin : '')}</div>
+          <div>API base: {typeof window !== 'undefined' ? window.location.origin : 'n/a'}</div>
           <div>Build: <code className="px-1 rounded bg-black/30">{new Date().toISOString().slice(0, 10)}</code></div>
         </div>
       </details>

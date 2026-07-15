@@ -26,6 +26,11 @@
     --ace-grid: rgba(255, 255, 255, 0.06);
     --ace-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.55), 0 8px 18px -6px rgba(0, 0, 0, 0.4);
     --ace-font-scale: 1;
+    /* Chrome bar heights — exposed as custom properties so window math in
+       `Window.tsx` reads the same value the actual bars use. The literals
+       below must match the `h-*` Tailwind classes on TopBar / Taskbar. */
+    --ace-topbar-height: 48px;
+    --ace-taskbar-height: 64px;
   }
   /* Font scale is multiplied through the root font-size so every
      rem-based utility scales uniformly. Clamped to a sane range. */
@@ -89,6 +94,29 @@
     color: var(--ace-accent);
     border: 1px solid color-mix(in srgb, var(--ace-accent) 50%, transparent);
   }
+}
+
+/* =============================================================
+   Reduced motion. Honours both the browser's `prefers-reduced-motion`
+   media query (the OS-level switch) and the user's in-app
+   `reduceMotion` preference (written by Settings → Theme to
+   `data-reduce-motion` on <html>). Either signal alone is enough
+   to suppress our non-essential animations.
+   ============================================================= */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+html[data-reduce-motion='true'] *,
+html[data-reduce-motion='true'] *::before,
+html[data-reduce-motion='true'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
 }
 
 /* Custom scrollbars are already declared in index.html; nothing more here. */

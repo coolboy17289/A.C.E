@@ -15,40 +15,39 @@ export const BootScreen: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false;
+    // Single source of truth for the boot animation. Whichever path
+    // (probe success, probe failure, or hard timeout) flips the phase
+    // first cancels the others — otherwise the boot screen can pulse
+    // a second time when the fallback timer fires *after* the probe
+    // already finished.
+    const finish = () => {
+      if (cancelled) return;
+      clearTimeout(probeTimer);
+      clearTimeout(fallbackTimer);
+      setPhase('pulse');
+      setTimeout(() => {
+        if (cancelled) return;
+        setPhase('done');
+        bootDone();
+      }, 900);
+    };
+
     const probe = async () => {
       try {
         await api.getUser();
       } catch {
         /* swallow - we still boot */
       }
-      if (!cancelled) {
-        setPhase('pulse');
-        setTimeout(() => {
-          if (!cancelled) {
-            setPhase('done');
-            bootDone();
-          }
-        }, 900);
-      }
+      finish();
     };
     // Probe after a short delay so the React tree paints the logo first.
-    const t = setTimeout(probe, 350);
+    const probeTimer = setTimeout(probe, 350);
     // Hard fallback in case the network is broken or the backend is slow.
-    const fallback = setTimeout(() => {
-      if (!cancelled) {
-        setPhase('pulse');
-        setTimeout(() => {
-          if (!cancelled) {
-            setPhase('done');
-            bootDone();
-          }
-        }, 900);
-      }
-    }, 4500);
+    const fallbackTimer = setTimeout(finish, 4500);
     return () => {
       cancelled = true;
-      clearTimeout(t);
-      clearTimeout(fallback);
+      clearTimeout(probeTimer);
+      clearTimeout(fallbackTimer);
     };
   }, [bootDone]);
 

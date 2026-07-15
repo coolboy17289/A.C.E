@@ -22,18 +22,13 @@ import { useAceStore, type WallpaperPreset } from '@ace/shared';
  * requires a full reload (Vite does NOT re-run the glob on HMR).
  */
 
-// Case-insensitive extension filtering is intentionally implemented as a
-// post-filter rather than a brace-expansion case-list so the glob pattern
-// stays small and predictable across Vite versions.
-//
-// The `@backgrounds` token is the Vite alias declared in
-// `desktop-shell/vite.config.ts` that resolves to
-// `frontend/desktop-shell/public/backgrounds/`. Using the alias (rather
-// than a hard-coded `../public/...`) means dev + build both resolve to
-// the same path even if this file's location ever moves.
+// `import.meta.glob` syntax: Vite ≥5 recommends `query: '?url', import: 'default'`
+// over the deprecated `as: 'url'`. The alias `@backgrounds` resolves to
+// `frontend/desktop-shell/public/backgrounds/` via vite.config.ts so the
+// path stays stable if this file ever moves.
 const URL_MODULES = import.meta.glob(
   '@backgrounds/*',
-  { eager: true, as: 'url' },
+  { eager: true, query: '?url', import: 'default' },
 ) as Record<string, string>;
 
 /** `background1.png` → `Background 1`, `my-scene.PNG` → `My scene`. */
@@ -68,12 +63,24 @@ function deriveId(fileName: string): string {
 const SUPPORTED_EXT = /\.(png|jpg|jpeg|webp|gif|avif)$/i;
 
 function buildBundledBackgrounds(): WallpaperPreset[] {
+  // Dedupe by case-insensitive basename. NTFS / HFS+ / case-insensitive
+  // filesystems won't surface the conflict, but Vite's glob runs over
+  // the raw filename list and would happily emit both BACKGROUND1.png
+  // and background1.png as separate bundles (one of them 482 KB the
+  // other 4 KB — same image, different case, paid for twice).
+  const seen = new Set<string>();
   return Object.entries(URL_MODULES)
     .map(([filePath, url]) => [normaliseKey(filePath), url] as const)
     .filter(([filePath]) => SUPPORTED_EXT.test(filePath))
+    .filter(([filePath]) => {
+      const base = (filePath.split('/').pop() ?? filePath).toLowerCase();
+      if (seen.has(base)) return false;
+      seen.add(base);
+      return true;
+    })
     .sort(([aPath], [bPath]) => {
-      // Case-insensitive alphabetical sort keeps BACKGROUND1.png and
-      // background1.png together; ties broken by exact case.
+      // Case-insensitive alphabetical sort, ties broken by exact case
+      // so `bg-A.png` precedes `bg-a.png` for predictability.
       const a = aPath.toLowerCase();
       const b = bPath.toLowerCase();
       if (a < b) return -1;
@@ -83,7 +90,7 @@ function buildBundledBackgrounds(): WallpaperPreset[] {
     .map<WallpaperPreset>(([filePath, url]) => {
       const fileName = filePath.split('/').pop() ?? filePath;
       return {
-        id: deriveId(fileName),
+        id: deriveId(fileName.toLowerCase()),
         name: deriveDisplayName(fileName),
         css: FALLBACK_CSS,
         imageUrl: url,

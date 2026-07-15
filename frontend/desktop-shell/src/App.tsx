@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { api, useAceStore, WALLPAPER_STORAGE_KEY } from '@ace/shared';
+import { api, useAceStore, WALLPAPER_STORAGE_KEY, type UserPreferences } from '@ace/shared';
 import { BootScreen } from './components/BootScreen';
 import { TopBar } from './components/TopBar';
 import { Taskbar } from './components/Taskbar';
@@ -23,12 +23,17 @@ export function App() {
     const root = document.documentElement;
     root.style.setProperty('--ace-accent', prefs.accentColor || '#60a5fa');
     document.documentElement.dataset.theme = prefs.theme === 'light' ? 'light' : 'dark';
+    // `reduceMotion` is also picked up via the browser's
+    // `prefers-reduced-motion` media query in styles.css; we mirror it
+    // as a data-attribute so JS-driven animations (zustand subscribers,
+    // inline `style.transition`, etc.) can opt out too.
+    document.documentElement.dataset.reduceMotion = prefs.reduceMotion ? 'true' : 'false';
 
     // Cache locally so the next boot is themed before the backend responds.
     try {
       localStorage.setItem(ACCENT_KEY, prefs.accentColor ?? '');
     } catch { /* ignore quota errors */ }
-  }, [prefs.accentColor, prefs.theme]);
+  }, [prefs.accentColor, prefs.theme, prefs.reduceMotion]);
 
   // -------- Load saved settings on first paint --------
   useEffect(() => {
@@ -45,13 +50,24 @@ export function App() {
         // 2) Then pull the canonical state from the backend.
         const user = await api.getUser();
         if (cancelled) return;
+        // Use a snapshot of the prefs at *app boot* (the closure value
+        // above) as the "untouched" baseline. Any field the user edits
+        // via the UI between mount and now has a different value, so we
+        // preserve the user's local edit instead of clobbering it with
+        // the backend's value.
+        const initial = prefs;
+        const backend = user.preferences;
+        const keep = <K extends keyof UserPreferences>(k: K): UserPreferences[K] => {
+          const current = useAceStore.getState().preferences[k];
+          return current === initial[k] ? (backend[k] ?? initial[k]) : current;
+        };
         setPreferences({
-          accentColor: user.preferences.accentColor,
-          fontScale: user.preferences.fontScale,
-          reduceMotion: user.preferences.reduceMotion,
-          notificationsEnabled: user.preferences.notificationsEnabled,
-          theme: user.preferences.theme,
-          username: user.preferences.username ?? user.name,
+          accentColor: keep('accentColor'),
+          fontScale: keep('fontScale'),
+          reduceMotion: keep('reduceMotion'),
+          notificationsEnabled: keep('notificationsEnabled'),
+          theme: keep('theme'),
+          username: keep('username') || backend.username || user.name,
         });
         const settings = await api.getSettings();
         if (cancelled) return;

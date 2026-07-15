@@ -7,8 +7,28 @@ interface Props {
   window: OpenWindow;
 }
 
-const TASKBAR_HEIGHT = 64;
-const TOPBAR_HEIGHT = 48;
+/**
+ * Top and bottom chrome heights, in pixels. Read from the CSS custom
+ * properties on `:root` so window math agrees with the actual bars; if
+ * the property is missing (e.g. an early render before stylesheets load)
+ * we fall back to the legacy literals.
+ *
+ * The values are *not* snapshotted at module load — bars can change
+ * height in a tablet layout, and a stale literal would desync window
+ * positioning. Each render reads the live computed value.
+ */
+function useBarHeights(): { top: number; bottom: number } {
+  const read = React.useCallback((name: string, fallback: number) => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return fallback;
+    const raw = getComputedStyle(document.documentElement).getPropertyValue(name);
+    const n = parseFloat(raw);
+    return Number.isFinite(n) && n > 0 ? n : fallback;
+  }, []);
+  return {
+    top: read('--ace-topbar-height', 48),
+    bottom: read('--ace-taskbar-height', 64),
+  };
+}
 
 /**
  * Single draggable, resizable window frame. Drag works through pointer
@@ -18,6 +38,7 @@ const TOPBAR_HEIGHT = 48;
  * matches the launcher tiles.
  */
 export const Window: React.FC<Props> = ({ window: w }) => {
+  const { top: TOPBAR_HEIGHT, bottom: TASKBAR_HEIGHT } = useBarHeights();
   const focus = useAceStore((s) => s.focusWindow);
   const close = useAceStore((s) => s.closeWindow);
   const minimize = useAceStore((s) => s.minimizeWindow);
@@ -27,13 +48,19 @@ export const Window: React.FC<Props> = ({ window: w }) => {
 
   const meta = APP_REGISTRY.find((a) => a.id === w.appId);
   const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
-  const resizeRef = useRef<{ startX: number; startY: number; w: number; h: number; edge: ResizeEdge } | null>(null);
+  // Resize must anchor to the position+size captured at pointerdown.
+  // Reading `w.x, w.y` mid-drag (while a parallel move update is in
+  // flight) would make N/W edges drift the window instead of resizing it.
+  const resizeRef = useRef<{ startX: number; startY: number; w: number; h: number; x: number; y: number; edge: ResizeEdge } | null>(null);
 
   const onPointerDownDrag = useCallback(
     (e: React.PointerEvent) => {
       if (w.maximized) return;
       focus(w.id);
-      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      // Capture on the title bar element itself, not e.target. `e.target`
+      // can be a child (the AppTile, an icon button) that loses capture
+      // when the DOM swaps on re-render or the pointer leaves the child.
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
       dragRef.current = { startX: e.clientX, startY: e.clientY, origX: w.x, origY: w.y };
     },
     [focus, w.id, w.x, w.y, w.maximized],
@@ -50,7 +77,7 @@ export const Window: React.FC<Props> = ({ window: w }) => {
   );
   const onPointerUpDrag = useCallback((e: React.PointerEvent) => {
     if (dragRef.current) {
-      (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
+      (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
       dragRef.current = null;
     }
   }, []);
@@ -58,8 +85,16 @@ export const Window: React.FC<Props> = ({ window: w }) => {
   const beginResize = (edge: ResizeEdge) => (e: React.PointerEvent) => {
     e.stopPropagation();
     focus(w.id);
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-    resizeRef.current = { startX: e.clientX, startY: e.clientY, w: w.width, h: w.height, edge };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    resizeRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      w: w.width,
+      h: w.height,
+      x: w.x,
+      y: w.y,
+      edge,
+    };
   };
   const onResizeMove = (e: React.PointerEvent) => {
     const r = resizeRef.current;
@@ -68,24 +103,24 @@ export const Window: React.FC<Props> = ({ window: w }) => {
     const dy = e.clientY - r.startY;
     let nw = r.w;
     let nh = r.h;
-    let nx = w.x;
-    let ny = w.y;
+    let nx = r.x;
+    let ny = r.y;
     if (r.edge.includes('e')) nw = Math.max(360, r.w + dx);
     if (r.edge.includes('s')) nh = Math.max(260, r.h + dy);
     if (r.edge.includes('w')) {
       nw = Math.max(360, r.w - dx);
-      nx = w.x + (r.w - nw);
+      nx = r.x + (r.w - nw);
     }
     if (r.edge.includes('n')) {
       nh = Math.max(260, r.h - dy);
-      ny = w.y + (r.h - nh);
+      ny = r.y + (r.h - nh);
     }
     resize(w.id, nw, nh);
     if (r.edge.includes('w') || r.edge.includes('n')) move(w.id, nx, ny);
   };
   const endResize = (e: React.PointerEvent) => {
     if (resizeRef.current) {
-      (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
+      (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
       resizeRef.current = null;
     }
   };
@@ -113,15 +148,24 @@ export const Window: React.FC<Props> = ({ window: w }) => {
         onPointerDown={onPointerDownDrag}
         onPointerMove={onPointerMoveDrag}
         onPointerUp={onPointerUpDrag}
-        className="h-11 flex items-center gap-2 px-3 select-none cursor-grab active:cursor-grabbing border-b border-white/5"
+        onKeyDown={(e) => {
+          // `focus(w.id)` is set on pointerdown; the title bar can still
+          // receive keyboard focus via tabindex for keyboard users.
+          if (e.key === 'Escape') {
+            e.stopPropagation();
+            close(w.id);
+          }
+        }}
+        tabIndex={-1}
+        className="h-11 flex items-center gap-2 px-3 select-none cursor-grab active:cursor-grabbing border-b border-white/5 focus:outline-none focus:ring-1 focus:ring-white/20"
         style={{
           touchAction: 'none',
           background: `linear-gradient(180deg, ${meta?.accent ?? 'var(--ace-accent)'}33, transparent)`,
         }}
       >
         <AppTile
-          appId={(meta?.id ?? 'ai') as 'ai'}
-          accent={meta?.accent ?? '#22d3ee'}
+          appId={meta?.id ?? w.appId}
+          accent={meta?.accent ?? 'var(--ace-accent)'}
           size={22}
         />
         <span className="text-sm font-semibold truncate">{w.title}</span>
@@ -130,7 +174,7 @@ export const Window: React.FC<Props> = ({ window: w }) => {
           <Icon name="minimize" size={14} />
         </ControlButton>
         <ControlButton ariaLabel={w.maximized ? 'Restore' : 'Maximise'} onClick={(e) => { e.stopPropagation(); maximize(w.id); }}>
-          <Icon name={w.maximized ? 'chevron-right' : 'maximize'} size={14} />
+          <Icon name={w.maximized ? 'restore' : 'maximize'} size={14} />
         </ControlButton>
         <ControlButton ariaLabel="Close" danger onClick={(e) => { e.stopPropagation(); close(w.id); }}>
           <Icon name="close" size={14} />
