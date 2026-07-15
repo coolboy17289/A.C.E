@@ -1,22 +1,19 @@
 import type { Application } from 'express';
 import type { Db } from '../db.js';
 import { ah } from '../util/error.js';
+import { ok } from '../util/envelope.js';
+import { record } from '../util/validate.js';
 
 /**
  * Settings storage.
  *
  * Persisted as a key/value table so callers can save arbitrary slices
  * (theme, accent, wallpaper, network config) without schema churn.
- *
- * History note: an earlier version of this route ALSO wrote the entire
- * payload under an `app` row in addition to writing each top-level key
- * as its own row. The mirror made GET return `{ wallpaper: ..., app:
- * { wallpaper: ..., ... } }`, which leaked the whole payload twice. We
- * now write only the per-key rows. The GET path still tolerates a
- * legacy `app` row in the database so existing devices keep working
- * without a migration.
  */
 const LEGACY_APP_KEY = 'app';
+const MAX_KEYS = 64;
+const MAX_KEY_LEN = 64;
+const MAX_VALUE_LEN = 16 * 1024; // 16kb per setting row
 
 export function registerSettingsRoutes(app: Application, db: Db) {
   app.get('/api/settings', ah((_req, res) => {
@@ -25,26 +22,40 @@ export function registerSettingsRoutes(app: Application, db: Db) {
     for (const r of rows) {
       try { out[r.key] = JSON.parse(r.value); } catch { out[r.key] = r.value; }
     }
-    res.json(out);
+    ok(res, out);
   }));
 
   app.put('/api/settings', ah(async (req, res) => {
-    const payload = (req.body ?? {}) as Record<string, unknown>;
+    const payload = record(req.body ?? {}, 'body');
+    const entries = Object.entries(payload);
+    if (entries.length === 0) { ok(res, { ok: true }); return; }
+    if (entries.length > MAX_KEYS) {
+      ok(res, null, 400);
+      return;
+    }
+
     const stmt = db.prepare(
       `INSERT INTO settings_kv (key, value) VALUES (?, ?)
        ON CONFLICT(key) DO UPDATE SET value=excluded.value`,
     );
-    const txn = db.transaction((entries: Record<string, unknown>) => {
-      for (const [k, v] of Object.entries(entries)) stmt.run(k, JSON.stringify(v));
+    const txn = db.transaction((entries: [string, unknown][]) => {
+      for (const [k, v] of entries) {
+        if (typeof k !== 'string' || k.length === 0 || k.length > MAX_KEY_LEN) {
+          throw new Error(`invalid settings key length`);
+        }
+        // Reject functions / undefined to keep storage shape stable.
+        if (v === undefined) continue;
+        const serialised = JSON.stringify(v);
+        if (serialised.length > MAX_VALUE_LEN) {
+          throw new Error(`settings value for "${k}" exceeds ${MAX_VALUE_LEN} bytes`);
+        }
+        stmt.run(k, serialised);
+      }
     });
-    // Per-key rows only. PUT callers (Settings UI on the frontend) save
-    // `{ wallpaper, accentColor, reduceMotion, ... }` and `{ wifi, kiosk }`
-    // separately; mixing both halves into a single `app` row produced an
-    // inconsistent GET shape.
-    txn(payload);
+    txn(entries);
     // Intentionally NOT writing to LEGACY_APP_KEY anymore. The GET path
     // still understands it for backward-compatible reads.
-    void LEGACY_APP_KEY; // referenced to keep import-lint quiet
-    res.json({ ok: true });
+    void LEGACY_APP_KEY;
+    ok(res, { ok: true });
   }));
 }

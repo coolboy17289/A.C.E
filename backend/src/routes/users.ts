@@ -1,8 +1,10 @@
 import type { Application } from 'express';
 import type { Db } from '../db.js';
 import { ah } from '../util/error.js';
+import { ok } from '../util/envelope.js';
 import { rowToUser } from '../db.js';
 import type { UserProfile } from '@ace/shared';
+import { str, optStr, record } from '../util/validate.js';
 
 /**
  * The student profile is a singleton. Both GET and PATCH auto-create the
@@ -14,20 +16,22 @@ import type { UserProfile } from '@ace/shared';
  */
 export function registerUserRoutes(app: Application, db: Db) {
   app.get('/api/users/me', ah((_req, res) => {
-    res.json(rowToUser(getOrCreateUser(db)));
+    ok(res, rowToUser(getOrCreateUser(db)));
   }));
 
   app.patch('/api/users/me', ah(async (req, res) => {
-    const patch = (req.body ?? {}) as Partial<UserProfile>;
+    const patch = record(req.body ?? {}, 'body');
     const existing = rowToUser(getOrCreateUser(db));
-    const merged = {
-      name: patch.name?.slice(0, 64) ?? existing.name,
-      avatar: patch.avatar?.slice(0, 32) ?? existing.avatar,
-      preferences: { ...existing.preferences, ...(patch.preferences ?? {}) },
-    };
+    const name = patch.name !== undefined ? str(patch.name, 'name', { maxLen: 64 }) : existing.name;
+    const avatar = patch.avatar !== undefined ? optStr(patch.avatar, 'avatar', { maxLen: 32 }) ?? existing.avatar : existing.avatar;
+    let preferences = existing.preferences;
+    if (patch.preferences !== undefined) {
+      const prefs = record(patch.preferences, 'preferences');
+      preferences = { ...existing.preferences, ...prefs } as UserProfile['preferences'];
+    }
     db.prepare('UPDATE users SET name = ?, avatar = ?, preferences = ? WHERE id = ?')
-      .run(merged.name, merged.avatar, JSON.stringify(merged.preferences), existing.id);
-    res.json(rowToUser(db.prepare('SELECT * FROM users WHERE id = ?').get(existing.id)));
+      .run(name, avatar, JSON.stringify(preferences), existing.id);
+    ok(res, rowToUser(db.prepare('SELECT * FROM users WHERE id = ?').get(existing.id)));
   }));
 }
 

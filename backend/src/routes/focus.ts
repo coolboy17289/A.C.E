@@ -1,46 +1,79 @@
 import type { Application } from 'express';
 import type { Db } from '../db.js';
 import { ah } from '../util/error.js';
+import { ok } from '../util/envelope.js';
 import { newId } from '../util/ids.js';
 import { rowToSession } from '../db.js';
-import type { FocusSession } from '@ace/shared';
+import {
+  str, optStr, num, bool, optIsoTs, oneOf, record,
+} from '../util/validate.js';
+
+const SESSION_TYPES = ['pomodoro', 'long', 'short'] as const;
 
 export function registerFocusRoutes(app: Application, db: Db) {
   app.get('/api/focus', ah((_req, res) => {
     const rows = db.prepare('SELECT * FROM sessions ORDER BY started_at DESC LIMIT 200').all();
-    res.json(rows.map(rowToSession));
+    ok(res, rows.map(rowToSession));
   }));
 
   app.post('/api/focus', ah(async (req, res) => {
-    const s = req.body as Omit<FocusSession, 'id'>;
+    const s = record(req.body ?? {}, 'body');
+    const startedAt = str(s.startedAt, 'startedAt'); // already ISO in tests
+    const endedAt = optIsoTs(s.endedAt, 'endedAt');
+    const durationMinutes = num(s.durationMinutes, 'durationMinutes', { min: 0, max: 24 * 60 });
+    const breakMinutes = num(s.breakMinutes, 'breakMinutes', { min: 0, max: 24 * 60 });
+    const type = oneOf(s.type, 'type', SESSION_TYPES);
+    const completed = s.completed === undefined ? false : bool(s.completed, 'completed');
+    const subjectId = optStr(s.subjectId, 'subjectId', { maxLen: 64 });
+    const notes = optStr(s.notes, 'notes', { maxLen: 4096 });
+
     const id = newId('ses');
     db.prepare(
       `INSERT INTO sessions (id, started_at, ended_at, duration_minutes, break_minutes, type, subject_id, completed, notes)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
-      id, s.startedAt, s.endedAt ?? null, s.durationMinutes, s.breakMinutes,
-      s.type, s.subjectId ?? null, s.completed ? 1 : 0, s.notes ?? null,
+      id, startedAt, endedAt ?? null, durationMinutes, breakMinutes,
+      type, subjectId, completed ? 1 : 0, notes,
     );
-    res.status(201).json(rowToSession(db.prepare('SELECT * FROM sessions WHERE id = ?').get(id)));
+    ok(res, rowToSession(db.prepare('SELECT * FROM sessions WHERE id = ?').get(id)), 201);
   }));
 
   app.patch('/api/focus/:id', ah(async (req, res) => {
     const id = req.params.id;
-    const patch = (req.body ?? {}) as Partial<FocusSession>;
-    // Pull raw row + map through rowToSession(). Without the map,
-    // `existing.endedAt` reads `undefined` (raw column is `ended_at`) and
-    // every PATCH silently nulls `endedAt` plus `subjectId` plus `notes`.
+    if (typeof id !== 'string' || id.length === 0) {
+      ok(res, null, 400);
+      return;
+    }
+    const patch = record(req.body ?? {}, 'body');
+    // Pull raw row + map through rowToSession().
     const rawExisting = db.prepare('SELECT * FROM sessions WHERE id = ?').get(id);
-    if (!rawExisting) { res.status(404).json({ error: 'not_found' }); return; }
+    if (!rawExisting) { ok(res, null, 404); return; }
     const existing = rowToSession(rawExisting);
-    const merged: FocusSession = { ...existing, ...patch };
+
+    const endedAt = patch.endedAt !== undefined
+      ? optIsoTs(patch.endedAt, 'endedAt')
+      : existing.endedAt;
+    const durationMinutes = patch.durationMinutes !== undefined
+      ? num(patch.durationMinutes, 'durationMinutes', { min: 0, max: 24 * 60 })
+      : existing.durationMinutes;
+    const breakMinutes = patch.breakMinutes !== undefined
+      ? num(patch.breakMinutes, 'breakMinutes', { min: 0, max: 24 * 60 })
+      : existing.breakMinutes;
+    const type = patch.type !== undefined ? oneOf(patch.type, 'type', SESSION_TYPES) : existing.type;
+    const completed = patch.completed !== undefined
+      ? bool(patch.completed, 'completed')
+      : existing.completed;
+    const subjectId = patch.subjectId !== undefined
+      ? optStr(patch.subjectId, 'subjectId', { maxLen: 64 })
+      : existing.subjectId;
+    const notes = patch.notes !== undefined ? optStr(patch.notes, 'notes', { maxLen: 4096 }) : existing.notes;
+
     db.prepare(
       `UPDATE sessions SET ended_at=?, duration_minutes=?, break_minutes=?, type=?, subject_id=?, completed=?, notes=? WHERE id=?`,
     ).run(
-      merged.endedAt ?? null, merged.durationMinutes, merged.breakMinutes,
-      merged.type, merged.subjectId ?? null, merged.completed ? 1 : 0,
-      merged.notes ?? null, id,
+      endedAt ?? null, durationMinutes, breakMinutes, type,
+      subjectId ?? null, completed ? 1 : 0, notes ?? null, id,
     );
-    res.json(rowToSession(db.prepare('SELECT * FROM sessions WHERE id = ?').get(id)));
+    ok(res, rowToSession(db.prepare('SELECT * FROM sessions WHERE id = ?').get(id)));
   }));
 }

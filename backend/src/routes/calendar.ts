@@ -1,58 +1,79 @@
 import type { Application } from 'express';
 import type { Db } from '../db.js';
 import { ah } from '../util/error.js';
+import { ok } from '../util/envelope.js';
 import { newId } from '../util/ids.js';
 import { rowToEvent } from '../db.js';
-import type { CalendarEvent } from '@ace/shared';
+import { str, optStr, record, oneOf, isoTs } from '../util/validate.js';
 
-function validateEvt(e: Partial<CalendarEvent>) {
-  if (!e.title || typeof e.title !== 'string') return 'title required';
-  if (!e.type) return 'type required';
-  if (!e.start || !e.end) return 'start/end required';
-  if (!e.start.includes('T') || !e.end.includes('T')) return 'start/end must be ISO timestamps';
-  return null;
-}
+const TYPES = ['assignment', 'exam', 'class', 'session', 'event'] as const;
 
 export function registerCalendarRoutes(app: Application, db: Db) {
   app.get('/api/calendar', ah((_req, res) => {
     const rows = db.prepare('SELECT * FROM events ORDER BY start ASC').all();
-    res.json(rows.map(rowToEvent));
+    ok(res, rows.map(rowToEvent));
   }));
 
   app.post('/api/calendar', ah(async (req, res) => {
-    const e = req.body as Omit<CalendarEvent, 'id'>;
-    const err = validateEvt(e);
-    if (err) { res.status(400).json({ error: 'invalid', details: err }); return; }
+    const e = record(req.body ?? {}, 'body');
+    const title = str(e.title, 'title', { maxLen: 256 });
+    const type = oneOf(e.type, 'type', TYPES);
+    const start = isoTs(e.start, 'start');
+    const end = isoTs(e.end, 'end');
+    if (Date.parse(end) < Date.parse(start)) {
+      ok(res, null, 400);
+      return;
+    }
+    const subjectId = optStr(e.subjectId, 'subjectId', { maxLen: 64 });
+    const notes = optStr(e.notes, 'notes', { maxLen: 4096 });
+    const location = optStr(e.location, 'location', { maxLen: 256 });
+
     const id = newId('evt');
     db.prepare(
       `INSERT INTO events (id, title, type, start, "end", subject_id, notes, location)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(id, e.title, e.type, e.start, e.end, e.subjectId ?? null, e.notes ?? null, e.location ?? null);
-    res.status(201).json(rowToEvent(db.prepare('SELECT * FROM events WHERE id = ?').get(id)));
+    ).run(id, title, type, start, end, subjectId, notes, location);
+    ok(res, rowToEvent(db.prepare('SELECT * FROM events WHERE id = ?').get(id)), 201);
   }));
 
   app.patch('/api/calendar/:id', ah(async (req, res) => {
     const id = req.params.id;
-    const patch = (req.body ?? {}) as Partial<CalendarEvent>;
+    if (typeof id !== 'string' || id.length === 0) {
+      ok(res, null, 400);
+      return;
+    }
+    const patch = record(req.body ?? {}, 'body');
     // Pull raw row, then map through rowToEvent() so the merged object
     // has camelCase keys (subjectId/notes/location) that line up with
-    // CalendarEvent. Otherwise `existing.subjectId` silently reads
-    // `undefined` and every PATCH nulls the subject link.
+    // CalendarEvent.
     const rawExisting = db.prepare('SELECT * FROM events WHERE id = ?').get(id);
-    if (!rawExisting) { res.status(404).json({ error: 'not_found' }); return; }
+    if (!rawExisting) { ok(res, null, 404); return; }
     const existing = rowToEvent(rawExisting);
-    const merged: CalendarEvent = { ...existing, ...patch };
-    const err = validateEvt(merged);
-    if (err) { res.status(400).json({ error: 'invalid', details: err }); return; }
+
+    const title = patch.title !== undefined ? str(patch.title, 'title', { maxLen: 256 }) : existing.title;
+    const type = patch.type !== undefined ? oneOf(patch.type, 'type', TYPES) : existing.type;
+    const start = patch.start !== undefined ? isoTs(patch.start, 'start') : existing.start;
+    const end = patch.end !== undefined ? isoTs(patch.end, 'end') : existing.end;
+    if (Date.parse(end) < Date.parse(start)) {
+      ok(res, null, 400);
+      return;
+    }
+    const subjectId = patch.subjectId !== undefined
+      ? optStr(patch.subjectId, 'subjectId', { maxLen: 64 })
+      : existing.subjectId;
+    const notes = patch.notes !== undefined ? optStr(patch.notes, 'notes', { maxLen: 4096 }) : existing.notes;
+    const location = patch.location !== undefined
+      ? optStr(patch.location, 'location', { maxLen: 256 })
+      : existing.location;
+
     db.prepare(
       `UPDATE events SET title=?, type=?, start=?, "end"=?, subject_id=?, notes=?, location=? WHERE id=?`,
-    ).run(merged.title, merged.type, merged.start, merged.end,
-      merged.subjectId ?? null, merged.notes ?? null, merged.location ?? null, id);
-    res.json(rowToEvent(db.prepare('SELECT * FROM events WHERE id = ?').get(id)));
+    ).run(title, type, start, end, subjectId ?? null, notes ?? null, location ?? null, id);
+    ok(res, rowToEvent(db.prepare('SELECT * FROM events WHERE id = ?').get(id)));
   }));
 
   app.delete('/api/calendar/:id', ah((req, res) => {
     db.prepare('DELETE FROM events WHERE id = ?').run(req.params.id);
-    res.json({ ok: true });
+    ok(res, { ok: true });
   }));
 }
