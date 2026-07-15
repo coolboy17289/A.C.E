@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+  html, body, #root { height: 100%; }
+  body { background: #0b1020; }
+}
+
+@layer components {
+  .ace-tile {
+    @apply rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur transition;
+  }
+  .ace-tile:hover { @apply border-white/20 bg-white/[0.07]; }
+  .ace-btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium border border-white/10 bg-white/5 text-ace-ink transition active:scale-[0.97];
+  }
+  .ace-btn:hover { @apply bg-white/10 border-white/20; }
+  .ace-btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white border border-white/0 transition active:scale-[0.97];
+    background: linear-gradient(135deg, #60a5fa, #a78bfa);
+  }
+  .ace-btn-primary:hover { filter: brightness(1.1); }
+  .ace-btn-danger {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white border border-red-400/30 transition active:scale-[0.97];
+    background: linear-gradient(135deg, #ef4444, #f97316);
+  }
+  .ace-input {
+    @apply w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 text-ace-ink placeholder:text-ace-muted focus:outline-none focus:border-ace-accent;
+  }
+  .ace-card {
+    @apply rounded-2xl p-4 border border-white/10 bg-white/[0.04];
+  }
+  .ace-pill {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium border border-white/10 bg-white/5;
+  }
+}

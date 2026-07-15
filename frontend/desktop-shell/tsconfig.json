@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["vite/client"],
+    "paths": {
+      "@ace/shared": ["../shared/src/index.ts"],
+      "@ace/shared/*": ["../shared/src/*"],
+      "@ace/app-home": ["../apps/home/src/index.ts"],
+      "@ace/app-planner": ["../apps/planner/src/index.ts"],
+      "@ace/app-tasks": ["../apps/tasks/src/index.ts"],
+      "@ace/app-focus": ["../apps/focus/src/index.ts"],
+      "@ace/app-subjects": ["../apps/subjects/src/index.ts"],
+      "@ace/app-ai": ["../apps/ai/src/index.ts"],
+      "@ace/app-statistics": ["../apps/statistics/src/index.ts"],
+      "@ace/app-settings": ["../apps/settings/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*", "vite.config.ts"]
+}
