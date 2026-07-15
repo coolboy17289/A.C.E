@@ -109,15 +109,22 @@ static void test_http_roundtrip(void)
         "POST /api/echo HTTP/1.1\r\n"
         "Host: localhost\r\n"
         "Content-Type: application/json\r\n"
-        "Content-Length: 47\r\n"
+        "Content-Length: 36\r\n"
         "\r\n"
         "{\"port\":4317,\"on\":true,\"name\":\"ace\"}";
     ssize_t w = write(c, req, strlen(req));
     EXPECT(w == (ssize_t)strlen(req), "wrote %zd", w);
 
     char buf[1024] = {0};
-    ssize_t r = read(c, buf, sizeof(buf) - 1);
-    EXPECT(r > 0, "read=%zd", r);
+    size_t got = 0;
+    /* The server writes headers and body in two writes. Loop until we
+     * have the body too, or the connection is closed. */
+    for (int i = 0; i < 8 && !strstr(buf, "echo_port"); i++) {
+        ssize_t r = read(c, buf + got, sizeof(buf) - 1 - got);
+        if (r <= 0) break;
+        got += (size_t)r;
+        buf[got] = '\0';
+    }
     EXPECT(strstr(buf, "HTTP/1.1 200") != NULL, "buf=%s", buf);
     EXPECT(strstr(buf, "\"echo_port\":4317") != NULL, "buf=%s", buf);
 

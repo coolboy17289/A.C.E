@@ -35,13 +35,18 @@
  * each callback can find the labels it should rewrite. A struct is
  * the natural callback-context shape (no closures in C).
  */
+/* `gatomic_int` would be a tat-pur-ports atomic but the click handler
+ * is the SOLE writer to `pending` and `apply_idle` (which runs on the
+ * main thread) is the sole decrementer. Cross-thread writes to
+ * `pending` only happen in the Soup callbacks, and they do not touch
+ * the counter — they just dispatch `apply_idle` via g_idle_add. */
 typedef struct {
-    GtkLabel *backend_lbl;
-    GtkLabel *user_lbl;
-    GtkLabel *error_lbl;
-    GtkButton *refresh_btn;
+    GtkLabel    *backend_lbl;
+    GtkLabel    *user_lbl;
+    GtkLabel    *error_lbl;
+    GtkButton   *refresh_btn;
     SoupSession *session;
-    int        pending;
+    int          pending;
 } UiCtx;
 
 static void ui_set_error(UiCtx *ctx, const char *msg) {
@@ -170,6 +175,11 @@ static void fetch_one(UiCtx *ctx, const char *path) {
 static void on_refresh_clicked(GtkButton *btn, gpointer user_data) {
     (void)btn;
     UiCtx *ctx = user_data;
+    /* Re-entrancy guard. Without this, clicking Refresh while a fetch
+     * is in flight would set `pending = 2` again, clobber the in-flight
+     * counter, and let the older callbacks decrement through zero and
+     * re-enable the button mid-flight. */
+    if (ctx->pending > 0) return;
     gtk_button_set_label(ctx->refresh_btn, "Refreshing...");
     gtk_widget_set_sensitive(GTK_WIDGET(ctx->refresh_btn), FALSE);
     gtk_label_set_text(ctx->error_lbl, "");
@@ -228,7 +238,6 @@ static void activate(GtkApplication *app, gpointer user_data) {
     gtk_widget_set_name(error_lbl, "ace-error");
 
     GtkWidget *btn = gtk_button_new_with_label("Refresh");
-    g_signal_connect(btn, "clicked", G_CALLBACK(on_refresh_clicked), NULL);
 
     gtk_box_append(GTK_BOX(box), title);
     gtk_box_append(GTK_BOX(box), subtitle);
@@ -239,6 +248,9 @@ static void activate(GtkApplication *app, gpointer user_data) {
 
     gtk_window_set_child(GTK_WINDOW(win), box);
 
+    /* Allocate the per-window context BEFORE wiring the click handler.
+     * `ctx` is captured as user_data; if it were NULL the click
+     * callback would deref `ctx->pending` and segfault. */
     UiCtx *ctx = g_new0(UiCtx, 1);
     ctx->backend_lbl  = GTK_LABEL(backend_lbl);
     ctx->user_lbl     = GTK_LABEL(user_lbl);
@@ -247,17 +259,16 @@ static void activate(GtkApplication *app, gpointer user_data) {
     ctx->session      = soup_session_new();
     g_object_set(ctx->session, "user-agent", "ace-c-gtk4/0.1.0", NULL);
 
-    /* Re-wire the click handler now that we have a ctx to pass. */
+    /* Single click handler. The same callback is also the idle-source
+     * one-shot for the auto-fetch on first paint. */
     g_signal_connect(btn, "clicked", G_CALLBACK(on_refresh_clicked), ctx);
-
-    /* Auto-fetch on first show so the screen has data without a click. */
-    g_signal_connect_swapped(btn, "clicked", G_CALLBACK(on_refresh_clicked), ctx);
-    /* Replace earlier no-ctx connect; use g_idle_add to defer. */
     g_idle_add_once((GSourceOnceFunc) on_refresh_clicked, ctx);
 
-    gtk_window_set_destroy(GTK_WINDOW(win), NULL);
-    g_signal_connect_swapped(win, "destroy", G_CALLBACK(g_free), ctx);
+    /* Tear-down on window destroy. Order matters: unref the session
+     * FIRST (while ctx is still alive) so we can read `ctx->session`
+     * from inside G_CALLBACK(g_object_unref). g_free(ctx) runs second. */
     g_signal_connect_swapped(win, "destroy", G_CALLBACK(g_object_unref), ctx->session);
+    g_signal_connect_swapped(win, "destroy", G_CALLBACK(g_free), ctx);
 
     gtk_window_present(GTK_WINDOW(win));
 }

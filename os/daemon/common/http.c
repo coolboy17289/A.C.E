@@ -107,7 +107,7 @@ int ace_http_read_request(int fd, ace_http_req_t *out)
     size_t content_length = 0;
     char *p = line_end + 2; /* skip CRLF */
     while (p < header + end_at) {
-        char *eol = memchr(p, '\r', header + end_at - p);
+        char *eol = memchr(p, '\r', (size_t)(header + end_at + 2 - p));
         if (!eol) break;
         if (eol == p) { p = eol + 2; continue; }
         *eol = '\0';

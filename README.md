@@ -79,6 +79,53 @@ The desktop shell will open at `http://localhost:5173` in Chromium kiosk mode.
 npm run build
 ```
 
+## Port shells (alternative front-ends)
+
+A.C.E OS exposes a JSON API from `backend/` on port `4318`. Anything
+that can speak `GET /api/health` and `GET /api/users/me` can be a
+front-end. Beyond the React/Vite SPA that ships by default
+(`frontend/desktop-shell/`), six alternative front-ends live in this
+repo:
+
+| Stack      | Path                       | Native on Pi? | Boot speed vs Chromium kiosk |
+|------------|----------------------------|---------------|------------------------------|
+| Next.js    | `frontend/nextjs/`         | no (still Chromium) | faster FCP, otherwise equivalent |
+| Rust+Iced  | `frontend/rust-iced/`      | yes (`iced 0.13` over Wayland/X11) | **~80ms** cold start |
+| Rust+Slint | `frontend/rust-slint/`     | yes (Slint renderer) | **~60ms** cold start, smallest binary |
+| C++ / Qt 6 | `frontend/cpp-qt/`         | yes (Qt Widgets) | **~150ms** cold start |
+| Java + JavaFX | `frontend/java-javafx/` | yes (JDK 17 + OpenJFX) | **~600ms** cold start (JVM warmup) |
+| C + GTK4   | `frontend/c-gtk4/`         | yes (Wayland native) | **~50ms** cold start |
+
+Each port has its own `README.md` with prerequisites + a build/run
+recipe. To get all six running side-by-side against the same backend:
+
+```bash
+npm run dev:backend            # terminal 1
+./scripts/dev-all.sh           # terminal 2 (tmux dashboard)
+```
+
+Or pick and choose:
+
+```bash
+npm run shell:nextjs:dev
+npm run shell:rust-iced:check
+npm run shell:cpp-qt:build
+npm run shell:java-javafx:run
+npm run shell:c-gtk4:build && npm run shell:c-gtk4:run
+```
+
+`scripts/verify-shells.mjs` (`npm run shells:verify`) is a smoke test
+that hits the two shared endpoints and asserts the JSON shape the
+shells rely on — useful in CI before kicking off cross-compilation.
+
+### MVP scope (intentionally narrow)
+
+Every port's MVP is a single window with three label rows + a Refresh
+button: `Backend:` (`/api/health`), `User:` (`/api/users/me`), plus a
+timestamp. None of them reimplements the React dashboard; they exist
+to validate end-to-end plumbing (HTTP → parsing → render → click). To
+port full features, follow the per-stack READMEs as the entry point.
+
 ## Raspberry Pi Deployment
 
 See [`system/linux-config/INSTALL.md`](system/linux-config/INSTALL.md) for full deployment instructions to Raspberry Pi hardware.

@@ -93,17 +93,22 @@ public class HelloAce extends Application {
     }
 
     private void refresh() {
+        // Re-entrancy guard. If a fetch is in flight the user has
+        // already clicked — ignore subsequent presses until both
+        // pending calls settle. `isDisabled()` is the canonical
+        // JavaFX accessor; the *setter* is still `setDisable(boolean)`.
+        if (refreshBtn.isDisabled()) return;
         errorLbl.setText("");
         refreshBtn.setDisable(true);
         refreshBtn.setText("Refreshing...");
         // Two outstanding calls. Both must settle before the button
-        // is re-enabled — handled by `pendingCount()`.
+        // is re-enabled — handled by `doneOne()`.
         pending.set(2);
-        fetchAsync("/api/health",  this::applyHealth, "health");
-        fetchAsync("/api/users/me", this::applyUser,    "user");
+        fetchAsync("/api/health", "health");
+        fetchAsync("/api/users/me", "user");
     }
 
-    private void fetchAsync(String path, HttpResponse.BodySubscriber<String> ignored, String kind) {
+    private void fetchAsync(String path, String kind) {
         HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(BACKEND_BASE + path))
                 .timeout(Duration.ofSeconds(3))
